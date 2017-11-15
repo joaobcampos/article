@@ -118,10 +118,10 @@ int main( int argc, char** argv )
   
   std::cout << "running ge with 8 correspondences" << std::endl;
   std::vector<int> indices8 = getNindices(8);
-  rotation_t ge_rotation;
+  transformation_t ge_transformation;
   gettimeofday( &tic, 0 );
   for( size_t i = 0; i < iterations; i++ )
-    ge_rotation = relative_pose::ge(adapter,indices8);
+    ge_transformation = relative_pose::ge(adapter,indices8);
   gettimeofday( &toc, 0 );
   double ge_time = TIMETODOUBLE(timeval_minus(toc,tic)) / iterations;
   
@@ -175,7 +175,7 @@ int main( int argc, char** argv )
   for( size_t i = 0; i < sixpt_rotations.size(); i++ )
     std::cout << sixpt_rotations[i] << std::endl << std::endl;
   std::cout << "result from ge using 8 points:" << std::endl;
-  std::cout << ge_rotation << std::endl << std::endl;
+  std::cout << ge_transformation << std::endl << std::endl;
   std::cout << "results from 17pt algorithm:" << std::endl;
   std::cout << seventeenpt_transformation << std::endl << std::endl;
   std::cout << "results from 17pt algorithm with all points:" << std::endl;
