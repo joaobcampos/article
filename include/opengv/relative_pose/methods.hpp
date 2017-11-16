@@ -501,7 +501,54 @@ transformation_t optimize_nonlinear(
     RelativeAdapterBase & adapter,
     const std::vector<int> & indices );
 
+
+/**
+ * Matrix that, given the Plucker coordinates of the given points will build the 36x36 matrix of the algorithm.
+ * \param[in] adapter Visitor holding bearing-vector correspondences.
+ * \param[in] L1: Plucker coordinates of the first point set.
+ * \param[in] L2: Plucker coordinates of the second set.
+ * \param[in] numberCorrespondences: Number of the given correspondences.
+ * \return 36x36 Matrix needed to calculate the relationship between the essential and the rotation matrix.
+**/
+Eigen::MatrixXd block_matrix(const RelativeAdapterBase& adapter, Eigen::MatrixXd &L1, Eigen::MatrixXd &L2, int numberCorrespondences);
+
+
+/**
+ * \param[in] X: antisymmetric matrix
+ * \return The rotation matrix corresponding to X
+ */
+Eigen::Matrix3d exp_R( Eigen::Matrix3d & X );
+
+/**
+ * \param[in] essential_matrix: The essential matrix corresponding to the rotation matrix R
+ * \param[in] R: A given rotation matrix
+ * \param[in] M: The matrix that is used to relate the rotation matrix and the essential matrix.
+ * \param[in] L1: Plucker coordinates of the first set
+ * \param[in] L2: Plucker coordinates of the second set
+ * \return Objective function
+ **/
+double f_obj( Eigen::Matrix3d & essential_matrix, const Eigen::Matrix3d & R, const Eigen::MatrixXd & M,const Eigen::MatrixXd & L1,
+	      const Eigen::MatrixXd & L2);
+
+/**
+ * \param[in] R: Rotation Matrix
+ * \param[in] M: Matrix used to calculate the relationship between the essential and rotation matrix
+ * \param[in] L1: Plucker coordinates of the first set
+ * \param[in] L2: Plucker coordinates of the second set
+ * \return Gradient of the objective function (o.f.)
+ */
+Eigen::Matrix3d D_x(const Eigen::Matrix3d & R, const Eigen::MatrixXd & M,const Eigen::MatrixXd & L1, const Eigen::MatrixXd & L2);
+
+/**
+ * \param[in] adapter: Visitor holding bearing-vector correspondences.
+ * \param[in] tol: tolerance of the algorithm
+ * \param[in] initial_guess: Initial state of the optimizer
+ * \param[in] numberCorrespondences: Number of correspondences
+ * \return The final transformation
+ **/
+Eigen::MatrixXd egea(const RelativeAdapterBase & adapter, double & tol, Eigen::Matrix3d & initial_guess, int numberCorrespondences);
 }
+
 }
 
 #endif /* OPENGV_RELATIVE_POSE_METHODS_HPP_ */
