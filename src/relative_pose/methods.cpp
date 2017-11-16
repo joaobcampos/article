@@ -34,6 +34,8 @@
 
 #include <Eigen/NonLinearOptimization>
 #include <Eigen/NumericalDiff>
+#include <Eigen/KroneckerProduct>
+#include <Eigen/QR>
 
 #include <opengv/OptimizationFunctor.hpp>
 #include <opengv/math/arun.hpp>
@@ -1196,4 +1198,256 @@ opengv::relative_pose::optimize_nonlinear(
 {
   Indices idx(indices);
   return optimize_nonlinear(adapter,idx);
+}
+
+Eigen::MatrixXd opengv::relative_pose::block_matrix(const RelativeAdapterBase& adapter, Eigen::MatrixXd &L1, Eigen::MatrixXd &L2,
+						    int numberCorrespondences)
+{
+  //std::cout << "Enters block matrix function: " << std::endl;
+  Eigen::MatrixXd M = Eigen::MatrixXd::Constant(36,36, 0.0);
+  L1 = Eigen::MatrixXd::Constant(6, numberCorrespondences, 0.0);
+  L2 = Eigen::MatrixXd::Constant(6, numberCorrespondences, 0.0);
+  Eigen::Matrix<double, 6, 1> l1 = Eigen::MatrixXd::Constant(6,1, 0.0);
+  Eigen::Matrix<double, 6, 1> l2 = Eigen::MatrixXd::Constant(6,1, 0.0);
+  Eigen::MatrixXd M1 = Eigen::MatrixXd::Constant(6,6, 0.0);
+  Eigen::MatrixXd M2 = Eigen::MatrixXd::Constant(6,6, 0.0);
+  for( size_t i = 0; i < (unsigned) numberCorrespondences; i++ )
+    {
+      bearingVector_t d1 = adapter.getBearingVector1(i);
+      bearingVector_t d2 = adapter.getBearingVector2(i);
+      translation_t v1 = adapter.getCamOffset1(i);
+      translation_t v2 = adapter.getCamOffset2(i);
+      rotation_t R1 = adapter.getCamRotation1(i);
+      rotation_t R2 = adapter.getCamRotation2(i);
+      //unrotate the bearing-vectors to express everything in the body frame
+      d1 = R1*d1;
+      d2 = R2*d2;
+      //generate the Plucker line coordinates
+      l1.block<3,1>(0,0) = d1;
+      l1.block<3,1>(3,0) = v1.cross(d1);
+      l2.block<3,1>(0,0) = d2;
+      l2.block<3,1>(3,0) = v2.cross(d2);
+      L1.block<6,1>(0,i) = l1;
+      L2.block<6,1>(0,i) = l2;
+      M1 = l1 * l1.transpose();
+      M2 = l2 * l2.transpose();
+      M = M + Eigen::kroneckerProduct(M2,M1);
+    }
+  Eigen::MatrixXd A(36,18);
+  A.block<36,3>(0,0) = M.block<36,3>(0,0);
+  A.block<36,3>(0,3) = M.block<36,3>(0,6);
+  A.block<36,3>(0,6) = M.block<36,3>(0,12);
+  A.block<36,3>(0,9) = M.block<36,3>(0,3) + M.block<36,3>(0,18);
+  A.block<36,3>(0,12) = M.block<36,3>(0,9) + M.block<36,3>(0,24);
+  A.block<36,3>(0,15) = M.block<36,3>(0,15) + M.block<36,3>(0,30);
+  Eigen::MatrixXd AE(A.block<36,9>(0,0));
+  Eigen::MatrixXd AR(A.block<36,9>(0,9));
+  Eigen::MatrixXd AE_inv_aux(AE.transpose() * AE);
+  AE_inv_aux = AE_inv_aux.inverse() * AE.transpose() * (-1.0);
+  Eigen::MatrixXd blockM(AE_inv_aux * AR);
+  //std::cout << "\nMatrix at the end of block matrix function" << std::endl << blockM << std::endl;
+  return blockM;
+
+}
+
+Eigen::Matrix3d opengv::relative_pose::exp_R( Eigen::Matrix3d & X )
+{
+
+  double phi = X.norm()/std::sqrt(2);
+  Eigen::Matrix3d X1 = X/phi;
+  Eigen::Matrix3d I = Eigen::Matrix< double, 3, 3 >::Identity();
+  I = I + std::sin(phi)*X1 + ( 1 - std::cos(phi) )*X1*X1;
+  return I;
+
+}
+
+double opengv::relative_pose::f_obj( Eigen::Matrix3d & essential_matrix, const Eigen::Matrix3d & R, const Eigen::MatrixXd & M,
+				     const Eigen::MatrixXd & L1, const Eigen::MatrixXd & L2)
+{
+  Eigen::Matrix3d A11 = M.block<3,3>(0,0);Eigen::Matrix3d A12 = M.block<3,3>(0,3);Eigen::Matrix3d A13 = M.block<3,3>(0,6);
+  Eigen::Matrix3d A21 = M.block<3,3>(3,0);Eigen::Matrix3d A22 = M.block<3,3>(3,3);Eigen::Matrix3d A23 = M.block<3,3>(3,6);
+  Eigen::Matrix3d A31 = M.block<3,3>(6,0);Eigen::Matrix3d A32 = M.block<3,3>(6,3);Eigen::Matrix3d A33 = M.block<3,3>(6,6);
+
+  Eigen::Matrix3d M11 = Matrix<double, 3, 3 >::Constant(3,3,0.0);M11(0,0) = 1;
+  Eigen::Matrix3d M12 = Matrix<double, 3, 3 >::Constant(3,3,0.0);M12(1,0) = 1;
+  Eigen::Matrix3d M13 = Matrix<double, 3, 3 >::Constant(3,3,0.0);M13(2,0) = 1;
+  Eigen::Matrix3d M21 = Matrix<double, 3, 3 >::Constant(3,3,0.0);M21(0,1) = 1;
+  Eigen::Matrix3d M22 = Matrix<double, 3, 3 >::Constant(3,3,0.0);M22(1,1) = 1;
+  Eigen::Matrix3d M23 = Matrix<double, 3, 3 >::Constant(3,3,0.0);M23(2,1) = 1;
+  Eigen::Matrix3d M31 = Matrix<double, 3, 3 >::Constant(3,3,0.0);M31(0,2) = 1;
+  Eigen::Matrix3d M32 = Matrix<double, 3, 3 >::Constant(3,3,0.0);M32(1,2) = 1;
+  Eigen::Matrix3d M33 = Matrix<double, 3, 3 >::Constant(3,3,0.0);M33(2,2) = 1;
+
+
+  essential_matrix = A11 * R * M11 + A12 * R * M12 + A13 * R * M13 + A21 * R * M21 + A22 * R * M22 + A23 * R * M23 + A31 * R * M31 + A32 * R * M32 + A33 * R * M33;
+
+  int points = L1.cols();
+  Vector3d d1(0.0, 0.0, 0.0);
+  Vector3d m1(0.0, 0.0, 0.0);
+  Vector3d d2(0.0, 0.0, 0.0);
+  Vector3d m2(0.0, 0.0, 0.0);
+  Eigen::Matrix<double, 1, 1> epsilon = Eigen::MatrixXd::Constant(1,1,0.0);
+  double f = 0;
+  for(int i = 0; i < points; ++i){
+    d1 = L1.block<3,1>(0,i);
+    m1 = L1.block<3,1>(3,i);
+    d2 = L2.block<3,1>(0,i);
+    m2 = L2.block<3,1>(3,i);
+
+    epsilon = d1.transpose() * essential_matrix * d2 + d1.transpose() * R * m2 + m1.transpose() * R * d2;
+    epsilon = epsilon * epsilon;
+    f = f + epsilon(0,0);
+  }
+  return f;
+}
+
+Eigen::Matrix3d opengv::relative_pose::D_x(const Eigen::Matrix3d & R, const Eigen::MatrixXd & M, const Eigen::MatrixXd & L1, const Eigen::MatrixXd & L2)
+{
+  Eigen::Matrix3d A11 = M.block<3,3>(0,0);Eigen::Matrix3d A12 = M.block<3,3>(0,3);Eigen::Matrix3d A13 = M.block<3,3>(0,6);
+  Eigen::Matrix3d A21 = M.block<3,3>(3,0);Eigen::Matrix3d A22 = M.block<3,3>(3,3);Eigen::Matrix3d A23 = M.block<3,3>(3,6);
+  Eigen::Matrix3d A31 = M.block<3,3>(6,0);Eigen::Matrix3d A32 = M.block<3,3>(6,3);Eigen::Matrix3d A33 = M.block<3,3>(6,6);
+
+  Eigen::Matrix3d M11 = Matrix<double, 3, 3 >::Constant(3,3,0.0);M11(0,0) = 1;
+  Eigen::Matrix3d M12 = Matrix<double, 3, 3 >::Constant(3,3,0.0);M12(1,0) = 1;
+  Eigen::Matrix3d M13 = Matrix<double, 3, 3 >::Constant(3,3,0.0);M13(2,0) = 1;
+  Eigen::Matrix3d M21 = Matrix<double, 3, 3 >::Constant(3,3,0.0);M21(0,1) = 1;
+  Eigen::Matrix3d M22 = Matrix<double, 3, 3 >::Constant(3,3,0.0);M22(1,1) = 1;
+  Eigen::Matrix3d M23 = Matrix<double, 3, 3 >::Constant(3,3,0.0);M23(2,1) = 1;
+  Eigen::Matrix3d M31 = Matrix<double, 3, 3 >::Constant(3,3,0.0);M31(0,2) = 1;
+  Eigen::Matrix3d M32 = Matrix<double, 3, 3 >::Constant(3,3,0.0);M32(1,2) = 1;
+  Eigen::Matrix3d M33 = Matrix<double, 3, 3 >::Constant(3,3,0.0);M33(2,2) = 1;
+
+  int points = L1.cols();
+  Vector3d d1(0.0, 0.0, 0.0);
+  Vector3d m1(0.0, 0.0, 0.0);
+  Vector3d d2(0.0, 0.0, 0.0);
+  Vector3d m2(0.0, 0.0, 0.0);
+
+  Eigen::Vector3d d1_11(0.0, 0.0, 0.0);
+  Eigen::Vector3d d1_12(0.0, 0.0, 0.0);
+  Eigen::Vector3d d1_13(0.0, 0.0, 0.0);
+  Eigen::Vector3d d1_21(0.0, 0.0, 0.0);
+  Eigen::Vector3d d1_22(0.0, 0.0, 0.0);
+  Eigen::Vector3d d1_23(0.0, 0.0, 0.0);
+  Eigen::Vector3d d1_31(0.0, 0.0, 0.0);
+  Eigen::Vector3d d1_32(0.0, 0.0, 0.0);
+  Eigen::Vector3d d1_33(0.0, 0.0, 0.0);
+
+  Eigen::Vector3d d2_11(0.0, 0.0, 0.0);
+  Eigen::Vector3d d2_12(0.0, 0.0, 0.0);
+  Eigen::Vector3d d2_13(0.0, 0.0, 0.0);
+  Eigen::Vector3d d2_21(0.0, 0.0, 0.0);
+  Eigen::Vector3d d2_22(0.0, 0.0, 0.0);
+  Eigen::Vector3d d2_23(0.0, 0.0, 0.0);
+  Eigen::Vector3d d2_31(0.0, 0.0, 0.0);
+  Eigen::Vector3d d2_32(0.0, 0.0, 0.0);
+  Eigen::Vector3d d2_33(0.0, 0.0, 0.0);
+  Eigen::Matrix3d devEpsilon = Eigen::Matrix3d::Constant(3,3,0.0);
+  Eigen::Matrix<double, 1, 1> epsilon = Eigen::MatrixXd::Constant(1,1,0.0);
+  Eigen::Matrix3d euclidean_gradient = Eigen::Matrix3d::Constant(3,3, 0.0);
+  Eigen::Matrix3d essential_matrix = A11 * R * M11 + A12 * R * M12 + A13 * R * M13 + A21 * R * M21 + A22 * R * M22 + A23 * R * M23 + A31 * R * M31 + A32 * R * M32 + A33 * R * M33;
+  for(int i = 0; i < points; ++i){
+    d1 = L1.block<3,1>(0,i);
+    m1 = L1.block<3,1>(3,i);
+    d2 = L2.block<3,1>(0,i);
+    m2 = L2.block<3,1>(3,i);
+
+    d1_11 = A11.transpose() * d1; d1_12 = A12.transpose() * d1; d1_13 = A13.transpose() * d1;
+    d1_21 = A21.transpose() * d1; d1_22 = A22.transpose() * d1; d1_23 = A23.transpose() * d1;
+    d1_31 = A31.transpose() * d1; d1_32 = A32.transpose() * d1; d1_33 = A33.transpose() * d1;
+
+    d2_11 = M11 * d2; d2_12 = M12 * d2; d2_13 = M13 * d2;
+    d2_21 = M21 * d2; d2_22 = M22 * d2; d2_23 = M23 * d2;
+    d2_31 = M31 * d2; d2_32 = M32 * d2; d2_33 = M33 * d2;
+
+    devEpsilon = d1_11 * d2_11.transpose() + d1_12 * d2_12.transpose() + d1_13 * d2_13.transpose() + d1_21 * d2_21.transpose() + d1_22 * d2_22.transpose() + d1_23 * d2_23.transpose() + d1_31 * d2_31.transpose() + d1_32 * d2_32.transpose() + d1_33 * d2_33.transpose() + d1 * m2.transpose() + m1 * d2.transpose();
+    epsilon = (d1.transpose() * essential_matrix * d2 ) + (d1.transpose() * R * m2) + (m1.transpose() * R * d2);
+    euclidean_gradient = euclidean_gradient + epsilon(0,0) * devEpsilon;
+  }
+  euclidean_gradient = 2 * euclidean_gradient;
+  return euclidean_gradient;
+}
+
+
+Eigen::MatrixXd opengv::relative_pose::egea(const RelativeAdapterBase & adapter, double & tol, Eigen::Matrix3d & initial_guess, int numberCorrespondences)
+{
+
+  Eigen::MatrixXd L1 = Eigen::MatrixXd::Constant(3,3,0.0);
+  Eigen::MatrixXd L2 = Eigen::MatrixXd::Constant(3,3,0.0);
+  Eigen::MatrixXd M = block_matrix(adapter, L1, L2, numberCorrespondences);
+  Eigen::Matrix3d essential_matrix = Eigen::Matrix3d::Identity(3,3);
+  //std::cout << "L1: " << std::endl << L1 << std::endl;
+  //std::cout << "L2: " << std::endl << L2 << std::endl;
+  // Initial Gess
+  double g = 1.0;
+  double erro = 1.0;
+  int k = 0;
+
+  // temp variables
+  Eigen::MatrixXd GE = Eigen::MatrixXd::Constant(3, 4, 0.0);
+  Eigen::Matrix3d Xf0, Xf1, DX, Z, P, Pt, Q, Qt, Y, S, R;
+  double zz;
+  Eigen::Matrix3d X = initial_guess;
+  //std::cout << "\n\nInitial guess" << std::endl << X << std::endl;
+  while( erro > tol && k < 1e5 )
+    {
+      Xf0 = X;
+      DX  = D_x( X, M, L1, L2 );
+      Z   = DX*X.transpose() - X*DX.transpose();
+      zz  = 0.5*( Z*Z.transpose() ).trace();
+      Pt  = -g*Z;
+      P   = exp_R( Pt );
+      Q   = P*P; // this seems strange
+      Qt  = Q*X;
+
+      while( ( f_obj( essential_matrix, X, M, L1, L2 ) - f_obj( essential_matrix, Qt, M, L1, L2 ) ) >= g*zz  )
+	{
+
+	  g   = 2*g;
+	  P   = Q;
+	  Q   = P*P; // this seems strange
+	  Qt  = Q*X;
+
+	}
+      Qt = P*X;
+      while( f_obj( essential_matrix, X, M, L1, L2) - f_obj(essential_matrix, Qt, M, L1, L2 ) < 0.5*g*zz)
+	{
+
+	  //   if ( f_obj( M, N, X, beta) - f_obj( M, N, Qt, beta ) < tol )
+	  //     break;
+
+	  g  = 0.5*g;
+	  Pt = -g*Z;
+	  P  = exp_R( Pt );
+	  Qt = P*X;
+
+	}
+      double f = f_obj( essential_matrix, X, M, L1, L2);
+      X    = P*X;
+      Xf1  = X;
+      erro = ( Xf1 - Xf0 ).norm();
+      /*std::cout << "\nIteration: " << k << std::endl;
+	std::cout << "Rotation: "    << std::endl << X << std::endl;
+	std::cout << "Euclidean grad: " << std::endl << DX << std::endl;
+	std::cout << "Function value: " << f << std::endl;
+	std::cout << "Essential matrix: " << essential_matrix << std::endl;*/
+      k++;
+    }
+
+  R=X;
+  double fobj = f_obj(essential_matrix, R, M, L1, L2);
+
+  Eigen::Matrix3d skew = essential_matrix * R.transpose();
+  // double fobj = f_obj( M, N, X, beta );
+  // std::cout << "objective function result: " << fobj << ", for the number of iterations: " << k << std::endl << "     and error: " << erro << std::endl;
+  //std::cout << "Rotation matrix obtained: " << std::endl << R << std::endl;
+  GE(0,0) = R(0,0); GE(0,1) = R(0,1); GE(0,2) = R(0,2);
+  GE(1,0) = R(1,0); GE(1,1) = R(1,1); GE(1,2) = R(1,2);
+  GE(2,0) = R(2,0); GE(2,1) = R(2,1); GE(2,2) = R(2,2);
+  GE(0,3) = skew(2,1);
+  GE(1,3) = skew(0,2);
+  GE(2,3) = skew(1,0);
+
+  return GE;
+
 }
