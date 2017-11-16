@@ -32,7 +32,7 @@ ENDIF()
 IF(MSVC)
   add_compile_options(/wd4514 /wd4267 $<$<CONFIG:DEBUG>:/bigobj>)
 ELSE()
-  add_definitions (-Wall -march=native -O3)
+  add_definitions (-Wall -march=native -O3 -std=c++11)
 ENDIF()
 
 IF(BUILD_POSITION_INDEPENDENT_CODE)
@@ -126,7 +126,8 @@ set( OPENGV_SOURCE_FILES
   src/relative_pose/MACentralRelative.cpp
   src/relative_pose/MANoncentralRelative.cpp
   src/relative_pose/MANoncentralRelativeMulti.cpp
-  src/point_cloud/MAPointCloud.cpp )
+  src/point_cloud/MAPointCloud.cpp
+  test/container.cpp)
 
 set( OPENGV_HEADER_FILES
   include/opengv/types.hpp
@@ -170,7 +171,8 @@ set( OPENGV_HEADER_FILES
   include/opengv/relative_pose/MACentralRelative.hpp
   include/opengv/relative_pose/MANoncentralRelative.hpp
   include/opengv/relative_pose/MANoncentralRelativeMulti.hpp
-  include/opengv/point_cloud/MAPointCloud.hpp )
+  include/opengv/point_cloud/MAPointCloud.hpp
+  test/container.h)
 
 add_library( opengv ${OPENGV_SOURCE_FILES} ${OPENGV_HEADER_FILES} )
 add_library( random_generators test/random_generators.cpp test/random_generators.hpp test/experiment_helpers.cpp test/experiment_helpers.hpp test/time_measurement.cpp test/time_measurement.hpp )
@@ -293,6 +295,12 @@ IF (BUILD_TESTS)
   add_test(NAME test_Sturm
     WORKING_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
     COMMAND test_Sturm)
+
+  add_executable( results test/results.cpp )
+  target_link_libraries( results opengv random_generators)
+  add_test(NAME results
+  		WORKING_DIRECTORY ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
+		COMMAND results)
 
   set_target_properties(
     test_absolute_pose
