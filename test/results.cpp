@@ -51,8 +51,8 @@ int main( int argc, char** argv )
 {
   // initialize random seed
   initializeRandomSeed();
-  int n_experiments = 4;
-  int noise_levels = 3;
+  int n_experiments = 100;
+  int noise_levels = 30;
   //set experiment parameters
   double outlierFraction = 0.0;
   size_t numberPoints = 100;
